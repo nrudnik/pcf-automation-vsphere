@@ -1,0 +1,96 @@
+---
+resource_types:
+- name: pivnet
+  type: docker-image
+  source:
+    repository: pivotalcf/pivnet-resource
+    tag: latest-final
+
+resources:
+- name: config
+  type: git
+  source:
+    uri: ((pipeline-repo))
+    branch: master
+- name: platform-automation-pivnet
+  type: pivnet
+  source:
+    api_token: ((pivnet-refresh-token))
+    product_slug: platform-automation
+    product_version: 3\.(.*)
+    sort_by: semver
+- name: platform-automation-tasks-s3
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-access-key))
+    endpoint: ((s3-endpoint))
+    disable_ssl: true
+    bucket: ((s3-bucket))
+    regexp: platform-automation-tasks-(.*).zip
+- name: platform-automation-image-s3
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-access-key))
+    endpoint: ((s3-endpoint))
+    disable_ssl: true
+    bucket: ((s3-bucket))
+    regexp: platform-automation-image-(.*).tgz
+- name: opsman-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-access-key))
+    endpoint: ((s3-endpoint))
+    disable_ssl: true
+    bucket: ((s3-bucket))
+    regexp: ops-manager-vsphere-(.*).yml
+
+jobs:
+- name: fetch-platform-automation
+  # We use the pivnet resource to bootstrap the pipeline,
+  # and because this product is part of the pipeline, not the foundation
+  plan:
+  - get: platform-automation-pivnet
+    trigger: true
+  - aggregate:
+    - put: platform-automation-tasks-s3
+      params:
+        file: platform-automation-pivnet/*tasks*.zip
+    - put: platform-automation-image-s3
+      params:
+        file: platform-automation-pivnet/*image*.tgz
+- name: fetch-opsman
+  serial_groups: [ fetch-ops ]
+  plan:
+  - aggregate:
+    - get: platform-automation-image-s3
+      params:
+        unpack: true
+    - get: platform-automation-tasks-s3
+      params:
+        unpack: true
+    - get: config
+  - task: credhub-interpolate-config
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/credhub-interpolate.yml
+    params:
+      CREDHUB_CLIENT: ((credhub-client))
+      CREDHUB_SECRET: ((credhub-secret))
+      CREDHUB_SERVER: ((credhub-server))
+      PREFIX: /
+      INTERPOLATION_PATH: config
+    input_mapping:
+      files: config
+    output_mapping:
+      interpolated-files: config
+  - task: download-opsman-image
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/download-product.yml
+    params:
+      CONFIG_FILE: config/ops-manager.yml
+  - aggregate:
+    - put: opsman-product
+      params:
+        file: downloaded-product/*
