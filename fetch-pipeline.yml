@@ -11,6 +11,7 @@ resources:
   type: git
   source:
     uri: ((pipeline-repo))
+    private_key: ((github-key.private_key))
     branch: master
 - name: platform-automation-pivnet
   type: pivnet
@@ -73,21 +74,22 @@ jobs:
         unpack: true
     - get: config
   - task: credhub-interpolate-config
-    image: platform-automation-image
-    file: platform-automation-tasks/tasks/credhub-interpolate.yml
+    image: platform-automation-image-s3
+    file: platform-automation-tasks-s3/tasks/credhub-interpolate.yml
     params:
       CREDHUB_CLIENT: ((credhub-client))
       CREDHUB_SECRET: ((credhub-secret))
       CREDHUB_SERVER: ((credhub-server))
-      PREFIX: /
+      CREDHUB_CA_CERT: ((credhub-ca-cert.certificate))
+      PREFIX: /concourse/main
       INTERPOLATION_PATH: config
     input_mapping:
       files: config
     output_mapping:
       interpolated-files: config
   - task: download-opsman-image
-    image: platform-automation-image
-    file: platform-automation-tasks/tasks/download-product.yml
+    image: platform-automation-image-s3
+    file: platform-automation-tasks-s3/tasks/download-product.yml
     params:
       CONFIG_FILE: config/ops-manager.yml
   - aggregate:
